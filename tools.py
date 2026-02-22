@@ -97,11 +97,6 @@ TOOLS = [
                         "max": {"type": "number"},
                     },
                 },
-                "override_principle_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "무시할 원칙 ID 목록. block_suggest 원칙을 override할 때 사용.",
-                },
                 "reason": {"type": "string"},
             },
             "required": ["action", "sl_price", "reason"],
@@ -157,37 +152,27 @@ TOOLS = [
     },
     {
         "name": "save_insight",
-        "description": "인사이트를 생성, 아카이브, 또는 폐기한다. create 시 origin_trades, key_observation 필수. archive/invalidate 시 insight_id, reason 필수.",
+        "description": "통계 기반 인사이트를 저장한다.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["create", "archive", "invalidate"], "default": "create"},
                 "content": {"type": "string"},
                 "category": {"type": "string", "enum": ["entry", "exit", "risk", "market", "general"]},
                 "supporting_data": {"type": "string", "description": "이 인사이트를 뒷받침하는 통계 요약"},
-                "origin_trades": {"type": "array", "items": {"type": "string"}, "description": "근거 거래 ID 목록"},
-                "key_observation": {"type": "string", "description": "핵심 관찰"},
-                "failed_attempts": {"type": "array", "items": {"type": "object"}, "description": "실패 경험 목록"},
-                "supersedes": {"type": "string", "description": "대체하는 기존 인사이트 ID"},
-                "trigger_conditions": {"type": "object", "description": "트리거 조건 (env_match, action_match, indicator_match)"},
-                "insight_id": {"type": "string", "description": "archive/invalidate 대상 ID"},
-                "reason": {"type": "string", "description": "archive/invalidate 사유"},
             },
-            "required": ["action"],
+            "required": ["content", "category", "supporting_data"],
         },
     },
     {
         "name": "save_principle",
-        "description": "검증된 인사이트를 트레이딩 원칙으로 승격한다. trigger_conditions 필수.",
+        "description": "검증된 인사이트를 트레이딩 원칙으로 승격한다.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "content": {"type": "string"},
                 "based_on_insight_id": {"type": "string"},
-                "trigger_conditions": {"type": "object", "description": "트리거 조건 (env_match, action_match)"},
-                "alert_level": {"type": "string", "enum": ["info", "block_suggest"], "default": "block_suggest"},
             },
-            "required": ["content", "trigger_conditions"],
+            "required": ["content"],
         },
     },
     {
@@ -223,17 +208,6 @@ TOOLS = [
                 "message": {"type": "string"},
             },
             "required": ["message"],
-        },
-    },
-    {
-        "name": "get_insight_detail",
-        "description": "특정 인사이트의 전체 reasoning_chain을 조회한다. 결과는 5분간 캐시된다.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "insight_id": {"type": "string"}
-            },
-            "required": ["insight_id"],
         },
     },
 ]

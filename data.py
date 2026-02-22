@@ -8,8 +8,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
-import config
-from config import REST_BASE
+from config import REST_BASE, TRADING_STAGE
 from config_secret import OKX_API_KEY, OKX_PASSPHRASE, OKX_SECRET_KEY
 
 
@@ -36,32 +35,26 @@ def _headers(method: str, request_path: str, body: str) -> Dict[str, str]:
         "OK-ACCESS-PASSPHRASE": OKX_PASSPHRASE,
         "Content-Type": "application/json",
     }
-    if config.TRADING_STAGE == 2:
+    if TRADING_STAGE == 2:
         headers["x-simulated-trading"] = "1"
     return headers
 
 
-def _request(method: str, request_path: str, params: Optional[Dict[str, Any]] = None, body: Optional[Any] = None) -> Dict[str, Any]:
+def _request(method: str, request_path: str, params: Optional[Dict[str, Any]] = None, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     url = f"{REST_BASE}{request_path}"
     payload = json.dumps(body, separators=(",", ":")) if body is not None else ""
-
-    # GET 요청 시 query string을 서명 경로에 포함
-    sign_path = request_path
-    if params:
-        query_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
-        sign_path = f"{request_path}?{query_string}"
 
     max_retries = 3
     backoffs = [2, 4, 8]
 
-    for attempt in range(1 + max_retries):
+    for attempt in range(1 + max_retries):  # 0=첫 시도, 1~3=재시도
         try:
             response = requests.request(
                 method=method.upper(),
                 url=url,
                 params=params,
                 data=payload if body is not None else None,
-                headers=_headers(method, sign_path, payload),
+                headers=_headers(method, request_path, payload),
                 timeout=10,
             )
         except requests.RequestException:
@@ -132,11 +125,7 @@ def cancel_order(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _request("POST", "/api/v5/trade/cancel-order", body=payload)
 
 
-def cancel_algos(payload: Any) -> Dict[str, Any]:
-    """알고 주문 취소. POST /api/v5/trade/cancel-algos"""
-    if isinstance(payload, str):
-        body = [{"instId": config.SYMBOL, "algoId": payload}]
-        return _request("POST", "/api/v5/trade/cancel-algos", body=body)
+def cancel_algos(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _request("POST", "/api/v5/trade/cancel-algos", body=payload)
 
 

@@ -4,4 +4,3 @@ anthropic
 gspread
 google-auth
 numpy
-pandas

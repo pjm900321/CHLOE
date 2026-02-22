@@ -9,9 +9,8 @@ from typing import Any, Dict, Optional
 
 import requests
 
-import config
 from ai_brain import AIBrain
-from config import ALERT_THROTTLE_SECONDS, SYMBOL, TELEGRAM_POLL_INTERVAL
+from config import ALERT_THROTTLE_SECONDS, SYMBOL, TELEGRAM_POLL_INTERVAL, TRADING_STAGE
 from config_secret import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from data import get_positions, get_ticker, place_order
 from logger import read_json_cache, write_json_cache
@@ -83,10 +82,6 @@ class TelegramHandler:
             self.send_message(self._stop())
         elif cmd == "/cost":
             self.send_message(self._cost_text())
-        elif cmd == "/confirm_stage2":
-            self.send_message(self._handle_confirm_stage2())
-        elif cmd == "/confirm_stage3":
-            self.send_message(self._handle_confirm_stage3())
         elif cmd == "/mute":
             hours = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
             self.muted_until = datetime.now(timezone.utc) + timedelta(hours=hours)
@@ -155,7 +150,7 @@ class TelegramHandler:
 
     def _panic(self) -> str:
         close_report = ""
-        if config.TRADING_STAGE == 1:
+        if TRADING_STAGE == 1:
             res = close_paper_position(exit_price=self._market_snapshot()["price"], close_percent=1.0, reason="panic")
             close_report = f"Stage1 청산 결과: {res.get('ok')}"
         else:
@@ -179,92 +174,6 @@ class TelegramHandler:
 
         self._pause("user_panic")
         return f"PANIC 실행 완료. {close_report}"
-
-    def _handle_confirm_stage2(self) -> str:
-        """Stage 2 전환 수동 승인."""
-        from logger import read_json
-
-        performance = read_json("performance.json")
-        total = performance.get("total_trades", 0)
-        ev = performance.get("ev", 0)
-        mdd = performance.get("max_drawdown", 0)
-
-        if config.TRADING_STAGE != 1:
-            return f"현재 Stage {config.TRADING_STAGE}입니다. Stage 1에서만 Stage 2로 전환 가능합니다."
-
-        errors = []
-        if total < config.MIN_TRADES_FOR_TRANSITION:
-            errors.append(f"거래 횟수: {total}/{config.MIN_TRADES_FOR_TRANSITION}")
-        if ev <= 0:
-            errors.append(f"EV: {ev:.4f} (양수 필요)")
-        if mdd > config.MAX_MDD_FOR_TRANSITION:
-            errors.append(f"MDD: {mdd:.1%} (최대 {config.MAX_MDD_FOR_TRANSITION:.0%})")
-
-        trade_log = read_json("trade_log.json")
-        if trade_log:
-            first_trade = trade_log[0].get("entry_time", "")
-            if first_trade:
-                try:
-                    first_dt = datetime.fromisoformat(first_trade.replace("Z", "+00:00"))
-                    days = (datetime.now(timezone.utc) - first_dt).days
-                    if days < config.MIN_DAYS_FOR_TRANSITION:
-                        errors.append(f"운영 일수: {days}/{config.MIN_DAYS_FOR_TRANSITION}")
-                except Exception:
-                    errors.append("운영 일수 확인 불가")
-        else:
-            errors.append("거래 이력 없음")
-
-        if errors:
-            return "Stage 2 전환 조건 미달:\n" + "\n".join(errors)
-
-        config.TRADING_STAGE = 2
-        return "Stage 2 (OKX Demo)로 전환 완료. 다음 재시작 시 config.py의 TRADING_STAGE를 2로 수정하세요."
-
-    def _handle_confirm_stage3(self) -> str:
-        """Stage 3 전환 수동 승인."""
-        from logger import read_json
-
-        performance = read_json("performance.json")
-        principles = read_json("principles.json")
-
-        if config.TRADING_STAGE != 2:
-            return f"현재 Stage {config.TRADING_STAGE}입니다. Stage 2에서만 Stage 3으로 전환 가능합니다."
-
-        errors = []
-        total = performance.get("total_trades", 0)
-        if total < config.MIN_TRADES_FOR_TRANSITION:
-            errors.append(f"거래 횟수: {total}/{config.MIN_TRADES_FOR_TRANSITION}")
-        if performance.get("ev", 0) <= 0:
-            errors.append("EV 양수 필요")
-        if performance.get("max_drawdown", 0) > config.MAX_MDD_FOR_TRANSITION:
-            errors.append("MDD 초과")
-
-        risk_principles = [
-            p
-            for p in principles
-            if "risk" in p.get("content", "").lower()
-            or p.get("trigger_conditions", {}).get("env_match", {}).get("volatility")
-        ]
-        if not risk_principles:
-            errors.append("principles.json에 리스크 관련 원칙 없음")
-
-        trade_log = read_json("trade_log.json")
-        if trade_log:
-            first_trade = trade_log[0].get("entry_time", "")
-            if first_trade:
-                try:
-                    first_dt = datetime.fromisoformat(first_trade.replace("Z", "+00:00"))
-                    days = (datetime.now(timezone.utc) - first_dt).days
-                    if days < config.MIN_DAYS_FOR_TRANSITION:
-                        errors.append(f"운영 일수: {days}/{config.MIN_DAYS_FOR_TRANSITION}")
-                except Exception:
-                    pass
-
-        if errors:
-            return "Stage 3 전환 조건 미달:\n" + "\n".join(errors)
-
-        config.TRADING_STAGE = 3
-        return "Stage 3 (Live)로 전환 완료. 서킷 브레이커 활성화됨. config.py의 TRADING_STAGE를 3으로 수정하세요."
 
     def _resume(self) -> str:
         state = read_json_cache("system_state.json")
