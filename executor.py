@@ -92,7 +92,7 @@ def _validate_slippage(
     if acceptable_price_range:
         min_px = float(acceptable_price_range.get("min", last_price))
         max_px = float(acceptable_price_range.get("max", last_price))
-        if not (min_px <= last_price <= max_px):  
+        if not (min_px <= last_price <= max_px):
             return False, f"가격 범위 초과로 진입 취소됨. 현재가 {last_price}"
 
     if decision_price <= 0:
