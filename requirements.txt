@@ -1,0 +1,7 @@
+requests
+websocket-client
+anthropic
+gspread
+google-auth
+numpy
+pandas
