@@ -1,0 +1,15 @@
+# OKX API
+OKX_API_KEY = ""
+OKX_SECRET_KEY = ""
+OKX_PASSPHRASE = ""
+
+# Claude API
+CLAUDE_API_KEY = ""
+
+# Telegram
+TELEGRAM_BOT_TOKEN = ""
+TELEGRAM_CHAT_ID = ""
+
+# Google Sheets
+GOOGLE_SHEETS_CREDS_FILE = "credentials.json"
+GOOGLE_SHEETS_SPREADSHEET_ID = ""
