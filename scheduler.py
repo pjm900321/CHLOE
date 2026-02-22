@@ -53,6 +53,9 @@ class Scheduler:
 
     def on_price_update(self, price: float) -> None:
         self.last_price = price
+        # executor에 최신 가격 전달 [v4.1 P1 fix]
+        from executor import update_price
+        update_price(price)
 
         if config.TRADING_STAGE == 1:
             try:
@@ -203,7 +206,7 @@ class Scheduler:
         if config.TRADING_STAGE < 2:
             return
 
-        from data import cancel_order, get_algo_orders_pending
+        from data import cancel_algos, get_algo_orders_pending
 
         try:
             pending = get_algo_orders_pending()
@@ -230,7 +233,7 @@ class Scheduler:
 
                     if can_retry_cancel(order_id):
                         try:
-                            cancel_order(order_id)
+                            cancel_algos(order_id)
                             self._queue_trigger(
                                 "user_message",
                                 {

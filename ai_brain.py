@@ -17,7 +17,6 @@ from config import (
     MAX_CLAUDE_CALLS_PER_HOUR,
     MAX_ITERATIONS,
     SYMBOL,
-    TRADING_STAGE,
 )
 from config_secret import CLAUDE_API_KEY
 from data import get_balance, get_candles, get_ticker
@@ -292,7 +291,7 @@ class AIBrain:
 {position_summary or '없음'}
 
 [잔고]
-{balance} USDT (Stage {TRADING_STAGE})
+{balance} USDT (Stage {config.TRADING_STAGE})
 
 [활성 시나리오]
 {_json_or_text(scenarios) if scenarios else '없음'}
@@ -492,7 +491,7 @@ class AIBrain:
 
     def _tool_close_position(self, tool_input: Dict[str, Any], last_price: Optional[float]) -> Dict[str, Any]:
         close_percent = float(tool_input.get("close_percent", 100)) / 100.0
-        if TRADING_STAGE == 1:
+        if config.TRADING_STAGE == 1:
             return close_paper_position(
                 exit_price=float(last_price or 0.0),
                 close_percent=close_percent,
@@ -501,14 +500,14 @@ class AIBrain:
         return {"ok": False, "reason": "Stage 2~3 close_position은 scheduler/websocket 통합 후 구현"}
 
     def _tool_modify_sl(self, tool_input: Dict[str, Any], last_price: Optional[float]) -> Dict[str, Any]:
-        if TRADING_STAGE == 1:
+        if config.TRADING_STAGE == 1:
             return update_paper_sl(float(tool_input["new_sl_price"]))
         # Stage 2~3: OKX 포지션/algo order에서 현재 SL 정보 조회 필요
         # 현재는 executor.modify_sl()에 필요한 algo_id를 WebSocket/REST에서 가져와야 함
         return {"ok": False, "reason": "Stage 2~3 modify_sl은 scheduler/websocket 통합 후 구현"}
 
     def _tool_modify_tp(self, tool_input: Dict[str, Any], last_price: Optional[float]) -> Dict[str, Any]:
-        if TRADING_STAGE == 1:
+        if config.TRADING_STAGE == 1:
             tp = float(tool_input.get("new_tp_price", 0))
             return update_paper_tp(None if tp == 0 else tp)
         return {"ok": False, "reason": "Stage 2~3 modify_tp는 executor 통합 예정"}

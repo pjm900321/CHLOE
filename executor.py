@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import config
-
 from config import (
     LEVERAGE,
     MAX_CONCURRENT_POSITIONS,
@@ -15,7 +14,6 @@ from config import (
     MAX_LOSS_PERCENT,
     STAGE3_DAILY_LOSS_HARD_LIMIT,
     SYMBOL,
-    TRADING_STAGE,
 )
 from data import (
     amend_algos,
@@ -114,7 +112,7 @@ def _validate_slippage(
 
 
 def _stage3_circuit_breaker() -> Tuple[bool, str]:
-    if TRADING_STAGE != 3:
+    if config.TRADING_STAGE != 3:
         return True, "ok"
     daily_loss = read_json_cache("daily_loss.json")
     daily_value = float(daily_loss.get("daily", 0.0))
@@ -181,7 +179,7 @@ def _validate_pre_entry(
         final_contracts = max(float(requested_contracts), 1.0)
 
     # 3. 동시 포지션 수 ≤ 1 확인
-    if TRADING_STAGE == 1:
+    if config.TRADING_STAGE == 1:
         paper_pos = read_json_cache("paper_position.json")
         pos_count = 1 if paper_pos.get("has_position") else 0
     else:
@@ -263,7 +261,7 @@ def open_position(
     contracts = validated["contracts"]
     notice = validated.get("notice", "")
 
-    if TRADING_STAGE == 1:
+    if config.TRADING_STAGE == 1:
         opened = open_paper_position(
             side=side,
             entry_price=last_price,
@@ -485,7 +483,7 @@ def verify_sl_registration(timeout_sec: int = 5) -> bool:
 
 
 def _force_close_if_needed(side: str, size: float) -> Dict[str, Any]:
-    if TRADING_STAGE == 1:
+    if config.TRADING_STAGE == 1:
         return close_paper_position(exit_price=0, close_percent=1.0, reason="sl_register_failed")
 
     close_side = "sell" if side == "long" else "buy"
