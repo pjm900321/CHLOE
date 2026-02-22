@@ -8,8 +8,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
-import config
-from config import REST_BASE
+from config import REST_BASE, TRADING_STAGE
 from config_secret import OKX_API_KEY, OKX_PASSPHRASE, OKX_SECRET_KEY
 
 
@@ -36,7 +35,7 @@ def _headers(method: str, request_path: str, body: str) -> Dict[str, str]:
         "OK-ACCESS-PASSPHRASE": OKX_PASSPHRASE,
         "Content-Type": "application/json",
     }
-    if config.TRADING_STAGE == 2:
+    if TRADING_STAGE == 2:
         headers["x-simulated-trading"] = "1"
     return headers
 
@@ -126,11 +125,7 @@ def cancel_order(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _request("POST", "/api/v5/trade/cancel-order", body=payload)
 
 
-def cancel_algos(payload: Any) -> Dict[str, Any]:
-    """알고 주문 취소. POST /api/v5/trade/cancel-algos"""
-    if isinstance(payload, str):
-        body = [{"instId": config.SYMBOL, "algoId": payload}]
-        return _request("POST", "/api/v5/trade/cancel-algos", body=body)
+def cancel_algos(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _request("POST", "/api/v5/trade/cancel-algos", body=payload)
 
 

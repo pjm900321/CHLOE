@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import logging
-import heapq
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set
 
 import requests
 
-import config
-from ai_brain import AIBrain, TRIGGER_PRIORITY
+from ai_brain import AIBrain
 from config import (
     COLD_STORE_DAYS,
     HEARTBEAT_INTERVAL,
@@ -17,9 +15,10 @@ from config import (
     SHEETS_SYNC_INTERVAL,
     STATS_REBUILD_INTERVAL,
     SYMBOL,
+    TRADING_STAGE,
 )
 from data import get_positions
-from logger import daily_stats_rebuild, read_json, read_json_cache, sync_to_sheets, write_json_cache
+from logger import daily_stats_rebuild, read_json_cache, sync_to_sheets, write_json_cache
 from paper_trading import check_paper_sl_tp
 from telegram_handler import TelegramHandler, send_message
 
@@ -44,20 +43,13 @@ class Scheduler:
 
         self._last_position_seen_nonzero = False
         self._position_missing_notified_at: Optional[float] = None
-        self._last_limit_check_at = now
 
         self._resume_notified = False
-        self._last_loss_alert_trade = ""
-        self._last_daily_loss_alert = ""
-        self._trigger_queue: List[tuple[int, str, Dict[str, Any]]] = []
 
     def on_price_update(self, price: float) -> None:
         self.last_price = price
-        # executor에 최신 가격 전달 [v4.1 P1 fix]
-        from executor import update_price
-        update_price(price)
 
-        if config.TRADING_STAGE == 1:
+        if TRADING_STAGE == 1:
             try:
                 check_paper_sl_tp(current_price=price)
             except Exception as exc:
@@ -75,8 +67,7 @@ class Scheduler:
         has_position = any(abs(float(row.get("pos", 0.0))) > 0 for row in rows)
 
         if self._last_position_seen_nonzero and not has_position:
-            self._queue_trigger("trade_closed", {"desc": "포지션 종료 감지"})
-            self._check_loss_alerts()
+            self._trigger_async("trade_closed", "포지션 종료 감지")
         self._last_position_seen_nonzero = has_position
 
     def tick(self) -> None:
@@ -88,8 +79,6 @@ class Scheduler:
         self._check_sheets_sync(now)
         self._check_cold_store(now)
         self._check_stage23_position_poll(now)
-        self._check_pending_limit_orders(now)
-        self._process_trigger_queue()
 
 
     def run(self) -> None:
@@ -124,141 +113,6 @@ class Scheduler:
             return
         self.ai_brain.run_trigger_async(trigger, desc, last_price=self.last_price if self.last_price > 0 else None)
         self.last_claude_call_at = time.time()
-
-    def _queue_trigger(self, trigger_type: str, data: Optional[Dict[str, Any]] = None) -> None:
-        priority = TRIGGER_PRIORITY.get(trigger_type, 99)
-        heapq.heappush(self._trigger_queue, (priority, trigger_type, data or {}))
-
-    def _next_trigger(self) -> Optional[tuple[int, str, Dict[str, Any]]]:
-        if self._trigger_queue:
-            return heapq.heappop(self._trigger_queue)
-        return None
-
-    def _process_trigger_queue(self) -> None:
-        item = self._next_trigger()
-        if not item:
-            return
-        _, trigger_type, data = item
-        desc = data.get("desc") or data.get("text") or str(data)
-        self._trigger_async(trigger_type, desc)
-
-    def _should_run_periodic_review(self) -> bool:
-        """활성 시나리오 또는 포지션이 있을 때만 periodic_review 실행."""
-        scenarios = read_json("scenarios.json")
-        has_scenarios = bool(scenarios)
-
-        paper_pos = read_json("paper_position.json")
-        has_paper_pos = bool(isinstance(paper_pos, dict) and paper_pos.get("has_position", False))
-
-        has_real_pos = False
-        if config.TRADING_STAGE >= 2:
-            try:
-                positions = get_positions()
-                rows = positions.get("data", []) if isinstance(positions, dict) else positions
-                has_real_pos = bool(rows)
-            except Exception:
-                pass
-
-        return has_scenarios or has_paper_pos or has_real_pos
-
-    def _check_loss_alerts(self) -> None:
-        """연속 3패 또는 일일 10% 손실 시 immediate_review 트리거."""
-        trade_log = read_json("trade_log.json")
-        if not trade_log:
-            return
-
-        recent = trade_log[-config.CONSECUTIVE_LOSS_ALERT :]
-        if len(recent) >= config.CONSECUTIVE_LOSS_ALERT:
-            all_loss = all(t.get("pnl_usdt", 0) < 0 for t in recent)
-            if all_loss:
-                last_trade_id = recent[-1].get("id", "")
-                if self._last_loss_alert_trade != last_trade_id:
-                    self._last_loss_alert_trade = last_trade_id
-                    self._queue_trigger(
-                        "immediate_review",
-                        {"reason": f"consecutive_{config.CONSECUTIVE_LOSS_ALERT}_losses"},
-                    )
-                    return
-
-        daily_loss = read_json("daily_loss.json")
-        daily_pnl = daily_loss.get("daily", 0) if isinstance(daily_loss, dict) else 0
-        if daily_pnl < 0:
-            try:
-                from data import get_balance
-
-                balance_data = get_balance()
-                balance = float(balance_data.get("data", [{}])[0].get("totalEq", 34.93))
-            except Exception:
-                balance = 34.93
-            loss_pct = abs(daily_pnl) / balance if balance > 0 else 0
-            if loss_pct >= config.DAILY_LOSS_ALERT_PERCENT:
-                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                if self._last_daily_loss_alert != today:
-                    self._last_daily_loss_alert = today
-                    self._queue_trigger("immediate_review", {"reason": f"daily_loss_{loss_pct:.1%}"})
-
-    def _check_pending_limit_orders(self, now: float) -> None:
-        """미체결 지정가 주문이 LIMIT_ORDER_EXPIRY_MINUTES 초과 시 자동 취소."""
-        if now - self._last_limit_check_at < 60:
-            return
-        self._last_limit_check_at = now
-
-        if config.TRADING_STAGE < 2:
-            return
-
-        from data import cancel_algos, get_algo_orders_pending
-
-        try:
-            pending = get_algo_orders_pending()
-            rows = pending.get("data", []) if isinstance(pending, dict) else pending
-            if not rows:
-                return
-
-            now_dt = datetime.now(timezone.utc)
-            expiry = timedelta(minutes=config.LIMIT_ORDER_EXPIRY_MINUTES)
-            for order in rows:
-                created = order.get("cTime", "")
-                if not created:
-                    continue
-                try:
-                    created_dt = datetime.fromtimestamp(int(created) / 1000, tz=timezone.utc)
-                except (ValueError, TypeError):
-                    continue
-
-                if now_dt - created_dt > expiry:
-                    order_id = order.get("algoId", "")
-                    if not order_id:
-                        continue
-                    from executor import can_retry_cancel
-
-                    if can_retry_cancel(order_id):
-                        try:
-                            cancel_algos(order_id)
-                            self._queue_trigger(
-                                "user_message",
-                                {
-                                    "text": f"[시스템] 지정가 주문 {order_id} 만료 취소됨 ({config.LIMIT_ORDER_EXPIRY_MINUTES}분 초과)"
-                                },
-                            )
-                        except Exception as exc:
-                            logging.warning("지정가 주문 취소 실패: %s", exc)
-        except Exception as exc:
-            logging.warning("미체결 주문 확인 실패: %s", exc)
-
-    def _get_rest_fallback_interval(self) -> int:
-        """REST 폴백 폴링 간격. 포지션 보유 시 5초, 아닌 경우 30초."""
-        paper = read_json("paper_position.json")
-        if isinstance(paper, dict) and paper.get("has_position", False):
-            return 5
-        if config.TRADING_STAGE >= 2:
-            try:
-                positions = get_positions()
-                rows = positions.get("data", []) if isinstance(positions, dict) else positions
-                if rows:
-                    return 5
-            except Exception:
-                pass
-        return 30
 
     def _check_resume_notification(self) -> None:
         state = read_json_cache("system_state.json")
@@ -315,11 +169,8 @@ class Scheduler:
 
         # periodic_review: 4시간마다
         if now - self._last_periodic_review_at >= 14400:
-            if self._should_run_periodic_review():
-                self._last_periodic_review_at = now
-                self.pending_nonurgent.add("periodic_review")
-            else:
-                self._last_periodic_review_at = now
+            self._last_periodic_review_at = now
+            self.pending_nonurgent.add("periodic_review")
 
     def _check_nonurgent_batching(self, now: float) -> None:
         if not self.pending_nonurgent:
@@ -414,7 +265,7 @@ class Scheduler:
             logging.info("cold store moved=%s", len(moved))
 
     def _check_stage23_position_poll(self, now: float) -> None:
-        if config.TRADING_STAGE == 1:
+        if TRADING_STAGE == 1:
             return
         if now - self._last_position_check_at < POSITION_CHECK_INTERVAL:
             return
@@ -435,11 +286,10 @@ class Scheduler:
                         is_critical=True,
                     )
                 elif now - self._position_missing_notified_at >= 300:
-                    self._queue_trigger(
+                    self._trigger_async(
                         "trade_closed",
-                        {"desc": "포지션 소실 감지 후 5분 무응답. OKX 이력 확인 및 거래 기록 업데이트 필요."},
+                        "포지션 소실 감지 후 5분 무응답. OKX 이력 확인 및 거래 기록 업데이트 필요.",
                     )
-                    self._check_loss_alerts()
                     self._position_missing_notified_at = None
             else:
                 self._position_missing_notified_at = None

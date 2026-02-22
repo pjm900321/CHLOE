@@ -11,8 +11,7 @@ from typing import Any, Callable, Dict, Optional
 
 from websocket import WebSocketApp
 
-import config
-from config import SYMBOL, WS_PRIVATE, WS_PRIVATE_DEMO, WS_PUBLIC, WS_PUBLIC_DEMO
+from config import SYMBOL, TRADING_STAGE, WS_PRIVATE, WS_PRIVATE_DEMO, WS_PUBLIC, WS_PUBLIC_DEMO
 from config_secret import OKX_API_KEY, OKX_PASSPHRASE, OKX_SECRET_KEY
 from data import get_positions, get_ticker
 from telegram_handler import send_message
@@ -39,7 +38,7 @@ class OKXWebSocketClient:
         self._internal_positions: Dict[str, Any] = {}
 
     def _resolve_urls(self) -> tuple[str, str]:
-        if config.TRADING_STAGE == 2:
+        if TRADING_STAGE == 2:
             return WS_PUBLIC_DEMO, WS_PRIVATE_DEMO
         return WS_PUBLIC, WS_PRIVATE
 
